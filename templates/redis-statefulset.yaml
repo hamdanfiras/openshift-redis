@@ -1,0 +1,172 @@
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: {{ include "redis-oss-sentinel.redis.fullname" . }}
+  labels:
+    {{- include "redis-oss-sentinel.redis.labels" . | nindent 4 }}
+  annotations:
+    {{- include "redis-oss-sentinel.annotations" . | nindent 4 }}
+spec:
+  serviceName: {{ include "redis-oss-sentinel.redis.headless" . }}
+  replicas: {{ .Values.redis.replicaCount }}
+  podManagementPolicy: OrderedReady
+  selector:
+    matchLabels:
+      {{- include "redis-oss-sentinel.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: redis
+  template:
+    metadata:
+      labels:
+        {{- include "redis-oss-sentinel.redis.labels" . | nindent 8 }}
+      annotations:
+        {{- include "redis-oss-sentinel.annotations" . | nindent 8 }}
+    spec:
+      serviceAccountName: {{ include "redis-oss-sentinel.serviceAccountName" . }}
+      terminationGracePeriodSeconds: {{ .Values.redis.terminationGracePeriodSeconds }}
+      {{- if .Values.redis.podSecurityContext.enabled }}
+      securityContext: {}
+      {{- end }}
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+
+      {{- /* Affinity / Anti-affinity (prod) */ -}}
+      {{- if and .Values.redis.podAntiAffinity.enabled (ge (int .Values.redis.replicaCount) 3) -}}
+      affinity:
+        podAntiAffinity:
+          {{- if eq .Values.redis.podAntiAffinity.type "required" }}
+          requiredDuringSchedulingIgnoredDuringExecution:
+            - labelSelector:
+                matchLabels:
+                  {{- include "redis-oss-sentinel.selectorLabels" . | nindent 18 }}
+                  app.kubernetes.io/component: redis
+              topologyKey: {{ .Values.redis.podAntiAffinity.topologyKey }}
+          {{- else }}
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 100
+              podAffinityTerm:
+                labelSelector:
+                  matchLabels:
+                    {{- include "redis-oss-sentinel.selectorLabels" . | nindent 20 }}
+                    app.kubernetes.io/component: redis
+                topologyKey: {{ .Values.redis.podAntiAffinity.topologyKey }}
+          {{- end }}
+      {{- else if .Values.redis.affinity }}
+      affinity:
+        {{- toYaml .Values.redis.affinity | nindent 8 }}
+      {{- end }}
+
+      {{- with .Values.redis.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.redis.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+
+      containers:
+        - name: redis
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          securityContext:
+            {{- if .Values.redis.containerSecurityContext.enabled }}
+            allowPrivilegeEscalation: {{ .Values.redis.containerSecurityContext.allowPrivilegeEscalation }}
+            readOnlyRootFilesystem: {{ .Values.redis.containerSecurityContext.readOnlyRootFilesystem }}
+            capabilities:
+              {{- toYaml .Values.redis.containerSecurityContext.capabilities | nindent 14 }}
+            {{- end }}
+          command:
+            - /bin/sh
+            - -ec
+            - |
+              cp /opt/config/redis.conf /opt/redis/redis.conf
+              chmod +x /opt/config/start-redis.sh
+              exec /opt/config/start-redis.sh
+          ports:
+            - name: redis
+              containerPort: {{ include "redis-oss-sentinel.redis.port" . }}
+              protocol: TCP
+          {{- if .Values.redis.auth.enabled }}
+          env:
+            - name: REDIS_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "redis-oss-sentinel.secretName" . }}
+                  key: redis-password
+          {{- end }}
+          volumeMounts:
+            - name: config
+              mountPath: /opt/config
+              readOnly: true
+            {{- if .Values.redis.persistence.enabled }}
+            - name: data
+              mountPath: /bitnami/redis/data
+            {{- else }}
+            - name: data
+              mountPath: /bitnami/redis/data
+            {{- end }}
+
+          readinessProbe:
+            exec:
+              command:
+                - /bin/sh
+                - -ec
+                - |
+                  if [ -n "${REDIS_PASSWORD:-}" ]; then
+                    redis-cli -a "${REDIS_PASSWORD}" -p {{ include "redis-oss-sentinel.redis.port" . }} ping | grep -q PONG
+                  else
+                    redis-cli -p {{ include "redis-oss-sentinel.redis.port" . }} ping | grep -q PONG
+                  fi
+            initialDelaySeconds: {{ .Values.redis.probes.readiness.initialDelaySeconds }}
+            periodSeconds: {{ .Values.redis.probes.readiness.periodSeconds }}
+            timeoutSeconds: {{ .Values.redis.probes.readiness.timeoutSeconds }}
+            failureThreshold: {{ .Values.redis.probes.readiness.failureThreshold }}
+
+          livenessProbe:
+            exec:
+              command:
+                - /bin/sh
+                - -ec
+                - |
+                  if [ -n "${REDIS_PASSWORD:-}" ]; then
+                    redis-cli -a "${REDIS_PASSWORD}" -p {{ include "redis-oss-sentinel.redis.port" . }} ping | grep -q PONG
+                  else
+                    redis-cli -p {{ include "redis-oss-sentinel.redis.port" . }} ping | grep -q PONG
+                  fi
+            initialDelaySeconds: {{ .Values.redis.probes.liveness.initialDelaySeconds }}
+            periodSeconds: {{ .Values.redis.probes.liveness.periodSeconds }}
+            timeoutSeconds: {{ .Values.redis.probes.liveness.timeoutSeconds }}
+            failureThreshold: {{ .Values.redis.probes.liveness.failureThreshold }}
+
+          resources:
+            {{- toYaml .Values.redis.resources | nindent 12 }}
+
+      volumes:
+        - name: config
+          configMap:
+            name: {{ include "redis-oss-sentinel.redis.fullname" . }}-config
+            defaultMode: 0444
+
+        {{- if not .Values.redis.persistence.enabled }}
+        - name: data
+          emptyDir: {}
+        {{- end }}
+
+  {{- if .Values.redis.persistence.enabled }}
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+        labels:
+          {{- include "redis-oss-sentinel.redis.labels" . | nindent 10 }}
+      spec:
+        accessModes:
+          {{- toYaml .Values.redis.persistence.accessModes | nindent 10 }}
+        resources:
+          requests:
+            storage: {{ .Values.redis.persistence.size }}
+        {{- if .Values.redis.persistence.storageClassName }}
+        storageClassName: {{ .Values.redis.persistence.storageClassName | quote }}
+        {{- end }}
+  {{- end }}

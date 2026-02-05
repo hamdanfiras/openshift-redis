@@ -1,0 +1,19 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "redis-oss-sentinel.redis.headless" . }}
+  labels:
+    {{- include "redis-oss-sentinel.redis.labels" . | nindent 4 }}
+  annotations:
+    {{- include "redis-oss-sentinel.annotations" . | nindent 4 }}
+spec:
+  clusterIP: None
+  publishNotReadyAddresses: true
+  selector:
+    {{- include "redis-oss-sentinel.selectorLabels" . | nindent 4 }}
+    app.kubernetes.io/component: redis
+  ports:
+    - name: redis
+      port: {{ .Values.redis.headlessService.port }}
+      targetPort: redis
+      protocol: TCP

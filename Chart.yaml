@@ -1,0 +1,6 @@
+apiVersion: v2
+name: redis-oss-sentinel
+description: Redis OSS with replication and optional Redis Sentinel for OpenShift (GitOps/Argo CD friendly)
+type: application
+version: 0.1.0
+appVersion: "7.4"

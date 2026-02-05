@@ -1,0 +1,21 @@
+Redis:
+  Service: {{ include "redis-oss-sentinel.redis.fullname" . }}
+  Headless: {{ include "redis-oss-sentinel.redis.headless" . }}
+  Port: {{ include "redis-oss-sentinel.redis.port" . }}
+  Replicas: {{ .Values.redis.replicaCount }}
+  Persistence: {{ ternary "enabled" "disabled" .Values.redis.persistence.enabled }}
+
+{{- if .Values.sentinel.enabled }}
+Sentinel:
+  Service: {{ include "redis-oss-sentinel.sentinel.fullname" . }}
+  Port: {{ include "redis-oss-sentinel.sentinel.port" . }}
+  Replicas: {{ .Values.sentinel.replicaCount }}
+  Master name: {{ .Values.redis.masterName }}
+  Quorum: {{ .Values.sentinel.quorum }}
+
+Clients should connect to Sentinel service and ask for the master:
+  SENTINEL get-master-addr-by-name {{ .Values.redis.masterName }}
+{{- else }}
+Sentinel is disabled.
+Clients should connect directly to Redis service (or redis-0 via headless DNS).
+{{- end }}

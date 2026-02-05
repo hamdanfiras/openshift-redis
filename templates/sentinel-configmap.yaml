@@ -1,0 +1,23 @@
+{{- if .Values.sentinel.enabled -}}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "redis-oss-sentinel.sentinel.fullname" . }}-config
+  labels:
+    {{- include "redis-oss-sentinel.sentinel.labels" . | nindent 4 }}
+  annotations:
+    {{- include "redis-oss-sentinel.annotations" . | nindent 4 }}
+data:
+  sentinel.conf: |
+    port {{ include "redis-oss-sentinel.sentinel.port" . }}
+    dir /tmp
+
+    sentinel monitor {{ .Values.redis.masterName }} redis-0.{{ include "redis-oss-sentinel.redis.headless" . }} {{ include "redis-oss-sentinel.redis.port" . }} {{ .Values.sentinel.quorum }}
+    sentinel down-after-milliseconds {{ .Values.redis.masterName }} {{ .Values.sentinel.config.downAfterMilliseconds }}
+    sentinel failover-timeout {{ .Values.redis.masterName }} {{ .Values.sentinel.config.failoverTimeout }}
+    sentinel parallel-syncs {{ .Values.redis.masterName }} {{ .Values.sentinel.config.parallelSyncs }}
+
+    {{- if .Values.redis.auth.enabled }}
+    sentinel auth-pass {{ .Values.redis.masterName }} ${REDIS_PASSWORD}
+    {{- end }}
+{{- end -}}

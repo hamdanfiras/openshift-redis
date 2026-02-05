@@ -1,0 +1,225 @@
+# ------------------------------------------------------------------------------
+# Redis OSS + Replication + optional Sentinel (OpenShift restricted SCC friendly)
+# ------------------------------------------------------------------------------
+# This chart supports two common profiles:
+#
+# --- PROD EXAMPLE (HA + Sentinel + optional persistence) ---
+# environment: prod
+# redis:
+#   replicaCount: 3            # 1 master (redis-0) + 2 replicas (redis-1..)
+#   auth:
+#     enabled: true
+#     existingSecret: ""       # if empty, chart creates a Secret using auth.password
+#     password: "CHANGE_ME"
+#   persistence:
+#     enabled: true
+#     storageClassName: ""     # set if needed
+#     size: 10Gi
+#   podAntiAffinity:
+#     enabled: true
+#     type: preferred          # preferred or required
+#   pdb:
+#     enabled: true
+#     minAvailable: 2
+# sentinel:
+#   enabled: true
+#   replicaCount: 3
+#   quorum: 2
+#   pdb:
+#     enabled: true
+#     minAvailable: 2
+# networkPolicy:
+#   enabled: true
+#
+# --- DEV EXAMPLE (cheap + single instance + no Sentinel) ---
+# environment: dev
+# redis:
+#   replicaCount: 1
+#   auth:
+#     enabled: false
+#   persistence:
+#     enabled: false
+#   podAntiAffinity:
+#     enabled: false
+#   pdb:
+#     enabled: false
+# sentinel:
+#   enabled: false
+# networkPolicy:
+#   enabled: false
+
+environment: dev
+
+nameOverride: ""
+fullnameOverride: ""
+
+commonLabels: {}
+commonAnnotations: {}
+
+image:
+  repository: docker.io/bitnami/redis
+  tag: "7.4.0"
+  pullPolicy: IfNotPresent
+
+sentinelImage:
+  repository: docker.io/bitnami/redis
+  tag: "7.4.0"
+  pullPolicy: IfNotPresent
+
+imagePullSecrets: []
+
+serviceAccount:
+  create: false
+  name: ""
+
+redis:
+  replicaCount: 1
+
+  masterName: "mymaster"
+
+  service:
+    enabled: true
+    type: ClusterIP
+    port: 6379
+
+  headlessService:
+    port: 6379
+
+  auth:
+    enabled: false
+    existingSecret: ""
+    password: ""
+
+  config:
+    # Base redis.conf options applied to all pods (master and replicas).
+    # Replication is bootstrapped deterministically by ordinal with a start script.
+    extra: |
+      # OpenShift-friendly defaults
+      protected-mode yes
+      port 6379
+      tcp-backlog 511
+      timeout 0
+      tcp-keepalive 300
+
+      # Persistence is controlled by values and/or args; keep config minimal here.
+      # "dir" must be writable by random UID; bitnami image uses /bitnami/redis/data by default.
+
+      # Replication-related safety
+      replica-serve-stale-data yes
+      replica-read-only yes
+      repl-diskless-sync yes
+      repl-diskless-sync-delay 5
+
+      # Memory policy (tune as needed)
+      # maxmemory 0
+      # maxmemory-policy noeviction
+
+  persistence:
+    enabled: false
+    storageClassName: ""
+    size: 8Gi
+    accessModes:
+      - ReadWriteOnce
+
+  resources:
+    requests:
+      cpu: 50m
+      memory: 128Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi
+
+  podSecurityContext:
+    # OpenShift assigns a random UID. Keep fsGroup unset by default for compatibility.
+    enabled: true
+
+  containerSecurityContext:
+    enabled: true
+    allowPrivilegeEscalation: false
+    readOnlyRootFilesystem: false
+    capabilities:
+      drop:
+        - ALL
+
+  nodeSelector: {}
+  tolerations: []
+  affinity: {}
+
+  podAntiAffinity:
+    enabled: false
+    type: preferred # preferred|required
+    topologyKey: kubernetes.io/hostname
+
+  pdb:
+    enabled: false
+    minAvailable: 1
+
+  probes:
+    readiness:
+      initialDelaySeconds: 10
+      periodSeconds: 10
+      timeoutSeconds: 3
+      failureThreshold: 6
+    liveness:
+      initialDelaySeconds: 20
+      periodSeconds: 10
+      timeoutSeconds: 3
+      failureThreshold: 6
+
+  terminationGracePeriodSeconds: 30
+
+sentinel:
+  enabled: false
+  replicaCount: 3
+
+  service:
+    port: 26379
+
+  quorum: 2
+
+  config:
+    downAfterMilliseconds: 10000
+    failoverTimeout: 60000
+    parallelSyncs: 1
+
+  resources:
+    requests:
+      cpu: 50m
+      memory: 64Mi
+    limits:
+      cpu: 300m
+      memory: 256Mi
+
+  containerSecurityContext:
+    enabled: true
+    allowPrivilegeEscalation: false
+    readOnlyRootFilesystem: false
+    capabilities:
+      drop:
+        - ALL
+
+  pdb:
+    enabled: false
+    minAvailable: 2
+
+  probes:
+    readiness:
+      initialDelaySeconds: 10
+      periodSeconds: 10
+      timeoutSeconds: 3
+      failureThreshold: 6
+    liveness:
+      initialDelaySeconds: 20
+      periodSeconds: 10
+      timeoutSeconds: 3
+      failureThreshold: 6
+
+networkPolicy:
+  enabled: false
+
+  # By default, allow from same namespace only. If you want to allow specific app pods
+  # from other namespaces, add selectors below.
+  appNamespaceSelector: {}
+  appPodSelector: {}
+
+  # When empty selectors are used, policies will still allow same-namespace traffic per rules.

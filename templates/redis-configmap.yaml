@@ -1,0 +1,50 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "redis-oss-sentinel.redis.fullname" . }}-config
+  labels:
+    {{- include "redis-oss-sentinel.redis.labels" . | nindent 4 }}
+  annotations:
+    {{- include "redis-oss-sentinel.annotations" . | nindent 4 }}
+data:
+  redis.conf: |
+{{- .Values.redis.config.extra | nindent 4 }}
+
+  start-redis.sh: |
+    #!/bin/sh
+    set -eu
+
+    ORDINAL="${HOSTNAME##*-}"
+    REDIS_PORT="{{ include "redis-oss-sentinel.redis.port" . }}"
+    HEADLESS="{{ include "redis-oss-sentinel.redis.headless" . }}"
+    MASTER_POD="redis-0"
+    MASTER_DNS="${MASTER_POD}.${HEADLESS}"
+
+    DATA_DIR="/bitnami/redis/data"
+    CONF="/opt/redis/redis.conf"
+
+    # Ensure data dir exists (bitnami image typically has it, but be defensive)
+    mkdir -p "${DATA_DIR}"
+
+    ARGS="--include ${CONF} --port ${REDIS_PORT} --dir ${DATA_DIR}"
+
+    {{- if .Values.redis.persistence.enabled }}
+    # AOF enabled when persistence is enabled (tunable as needed)
+    ARGS="${ARGS} --appendonly yes"
+    {{- else }}
+    # No persistence in dev/minimal mode
+    ARGS="${ARGS} --save \"\" --appendonly no"
+    {{- end }}
+
+    {{- if .Values.redis.auth.enabled }}
+    # Require auth for clients
+    ARGS="${ARGS} --requirepass \"${REDIS_PASSWORD}\" --masterauth \"${REDIS_PASSWORD}\""
+    {{- end }}
+
+    if [ "${ORDINAL}" = "0" ]; then
+      echo "Starting Redis as MASTER (pod ordinal 0)"
+      exec redis-server ${ARGS}
+    else
+      echo "Starting Redis as REPLICA of ${MASTER_DNS}"
+      exec redis-server ${ARGS} --replicaof "${MASTER_DNS}" "{{ include "redis-oss-sentinel.redis.port" . }}"
+    fi

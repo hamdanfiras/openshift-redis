@@ -1,0 +1,105 @@
+{{- if .Values.networkPolicy.enabled -}}
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "redis-oss-sentinel.fullname" . }}-np
+  labels:
+    {{- include "redis-oss-sentinel.labels" . | nindent 4 }}
+  annotations:
+    {{- include "redis-oss-sentinel.annotations" . | nindent 4 }}
+spec:
+  podSelector: {}
+  policyTypes:
+    - Ingress
+    - Egress
+  ingress:
+    # Allow app -> sentinel:26379 (when enabled)
+    {{- if .Values.sentinel.enabled }}
+    - from:
+        - namespaceSelector:
+            {{- toYaml .Values.networkPolicy.appNamespaceSelector | nindent 12 }}
+          podSelector:
+            {{- toYaml .Values.networkPolicy.appPodSelector | nindent 12 }}
+      ports:
+        - protocol: TCP
+          port: {{ include "redis-oss-sentinel.sentinel.port" . }}
+    {{- end }}
+
+    # Allow app -> redis:6379
+    - from:
+        - namespaceSelector:
+            {{- toYaml .Values.networkPolicy.appNamespaceSelector | nindent 12 }}
+          podSelector:
+            {{- toYaml .Values.networkPolicy.appPodSelector | nindent 12 }}
+      ports:
+        - protocol: TCP
+          port: {{ include "redis-oss-sentinel.redis.port" . }}
+
+    # Allow sentinel -> redis:6379
+    {{- if .Values.sentinel.enabled }}
+    - from:
+        - podSelector:
+            matchLabels:
+              {{- include "redis-oss-sentinel.selectorLabels" . | nindent 14 }}
+              app.kubernetes.io/component: sentinel
+      ports:
+        - protocol: TCP
+          port: {{ include "redis-oss-sentinel.redis.port" . }}
+    {{- end }}
+
+    # Allow sentinel <-> sentinel:26379
+    {{- if .Values.sentinel.enabled }}
+    - from:
+        - podSelector:
+            matchLabels:
+              {{- include "redis-oss-sentinel.selectorLabels" . | nindent 14 }}
+              app.kubernetes.io/component: sentinel
+      ports:
+        - protocol: TCP
+          port: {{ include "redis-oss-sentinel.sentinel.port" . }}
+    {{- end }}
+
+  egress:
+    # Allow DNS
+    - to:
+        - namespaceSelector: {}
+      ports:
+        - protocol: UDP
+          port: 53
+        - protocol: TCP
+          port: 53
+
+    # Allow sentinel -> redis
+    {{- if .Values.sentinel.enabled }}
+    - to:
+        - podSelector:
+            matchLabels:
+              {{- include "redis-oss-sentinel.selectorLabels" . | nindent 14 }}
+              app.kubernetes.io/component: redis
+      ports:
+        - protocol: TCP
+          port: {{ include "redis-oss-sentinel.redis.port" . }}
+    {{- end }}
+
+    # Allow redis -> redis (replication traffic)
+    - to:
+        - podSelector:
+            matchLabels:
+              {{- include "redis-oss-sentinel.selectorLabels" . | nindent 14 }}
+              app.kubernetes.io/component: redis
+      ports:
+        - protocol: TCP
+          port: {{ include "redis-oss-sentinel.redis.port" . }}
+
+    # Allow sentinel <-> sentinel
+    {{- if .Values.sentinel.enabled }}
+    - to:
+        - podSelector:
+            matchLabels:
+              {{- include "redis-oss-sentinel.selectorLabels" . | nindent 14 }}
+              app.kubernetes.io/component: sentinel
+      ports:
+        - protocol: TCP
+          port: {{ include "redis-oss-sentinel.sentinel.port" . }}
+    {{- end }}
+{{- end -}}

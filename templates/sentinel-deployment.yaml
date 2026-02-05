@@ -1,0 +1,91 @@
+{{- if .Values.sentinel.enabled -}}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "redis-oss-sentinel.sentinel.fullname" . }}
+  labels:
+    {{- include "redis-oss-sentinel.sentinel.labels" . | nindent 4 }}
+  annotations:
+    {{- include "redis-oss-sentinel.annotations" . | nindent 4 }}
+spec:
+  replicas: {{ .Values.sentinel.replicaCount }}
+  selector:
+    matchLabels:
+      {{- include "redis-oss-sentinel.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: sentinel
+  template:
+    metadata:
+      labels:
+        {{- include "redis-oss-sentinel.sentinel.labels" . | nindent 8 }}
+      annotations:
+        {{- include "redis-oss-sentinel.annotations" . | nindent 8 }}
+    spec:
+      serviceAccountName: {{ include "redis-oss-sentinel.serviceAccountName" . }}
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: sentinel
+          image: "{{ .Values.sentinelImage.repository }}:{{ .Values.sentinelImage.tag }}"
+          imagePullPolicy: {{ .Values.sentinelImage.pullPolicy }}
+          securityContext:
+            {{- if .Values.sentinel.containerSecurityContext.enabled }}
+            allowPrivilegeEscalation: {{ .Values.sentinel.containerSecurityContext.allowPrivilegeEscalation }}
+            readOnlyRootFilesystem: {{ .Values.sentinel.containerSecurityContext.readOnlyRootFilesystem }}
+            capabilities:
+              {{- toYaml .Values.sentinel.containerSecurityContext.capabilities | nindent 14 }}
+            {{- end }}
+          ports:
+            - name: sentinel
+              containerPort: {{ include "redis-oss-sentinel.sentinel.port" . }}
+              protocol: TCP
+          {{- if .Values.redis.auth.enabled }}
+          env:
+            - name: REDIS_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "redis-oss-sentinel.secretName" . }}
+                  key: redis-password
+          {{- end }}
+          command:
+            - /bin/sh
+            - -ec
+            - |
+              # Render sentinel.conf with env vars (REDIS_PASSWORD) without leaking secrets
+              envsubst < /opt/config/sentinel.conf > /tmp/sentinel.conf
+              exec redis-sentinel /tmp/sentinel.conf --port {{ include "redis-oss-sentinel.sentinel.port" . }}
+          volumeMounts:
+            - name: config
+              mountPath: /opt/config
+              readOnly: true
+          readinessProbe:
+            exec:
+              command:
+                - /bin/sh
+                - -ec
+                - |
+                  redis-cli -p {{ include "redis-oss-sentinel.sentinel.port" . }} ping | grep -q PONG
+            initialDelaySeconds: {{ .Values.sentinel.probes.readiness.initialDelaySeconds }}
+            periodSeconds: {{ .Values.sentinel.probes.readiness.periodSeconds }}
+            timeoutSeconds: {{ .Values.sentinel.probes.readiness.timeoutSeconds }}
+            failureThreshold: {{ .Values.sentinel.probes.readiness.failureThreshold }}
+          livenessProbe:
+            exec:
+              command:
+                - /bin/sh
+                - -ec
+                - |
+                  redis-cli -p {{ include "redis-oss-sentinel.sentinel.port" . }} ping | grep -q PONG
+            initialDelaySeconds: {{ .Values.sentinel.probes.liveness.initialDelaySeconds }}
+            periodSeconds: {{ .Values.sentinel.probes.liveness.periodSeconds }}
+            timeoutSeconds: {{ .Values.sentinel.probes.liveness.timeoutSeconds }}
+            failureThreshold: {{ .Values.sentinel.probes.liveness.failureThreshold }}
+          resources:
+            {{- toYaml .Values.sentinel.resources | nindent 12 }}
+      volumes:
+        - name: config
+          configMap:
+            name: {{ include "redis-oss-sentinel.sentinel.fullname" . }}-config
+            defaultMode: 0444
+{{- end -}}

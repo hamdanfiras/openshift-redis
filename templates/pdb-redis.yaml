@@ -1,0 +1,16 @@
+{{- if and .Values.redis.pdb.enabled (ge (int .Values.redis.replicaCount) 2) -}}
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: {{ include "redis-oss-sentinel.redis.fullname" . }}-pdb
+  labels:
+    {{- include "redis-oss-sentinel.redis.labels" . | nindent 4 }}
+  annotations:
+    {{- include "redis-oss-sentinel.annotations" . | nindent 4 }}
+spec:
+  minAvailable: {{ .Values.redis.pdb.minAvailable }}
+  selector:
+    matchLabels:
+      {{- include "redis-oss-sentinel.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: redis
+{{- end -}}
